@@ -105,7 +105,6 @@ right_cell = cols[1].container(
     border=True, height="stretch", vertical_alignment="center"
 )
 
-
 @st.cache_data(show_spinner=True, ttl="30d") # cache_data = 快取資料，show_spinner = 顯示載入動畫，ttl = 資料有效期限
 def fetch_data(yyymm: str) -> list:
     """抓單一月份所有頁，yyymm 為民國年月，例如 '11301'; 此api從'10701'開始有資料"""
@@ -159,7 +158,7 @@ def load_data(months: int) -> pd.DataFrame:
     for yyymm in yyymm_list:
         raw = fetch_data(yyymm)       # list
         df = process_data(raw)        # df
-        df["yyymm"] = yyymm           # 記錄月份
+        df["年月"] = yyymm           # 記錄月份
         all_dfs.append(df)
     
     return pd.concat(all_dfs, ignore_index=True)
@@ -167,9 +166,32 @@ def load_data(months: int) -> pd.DataFrame:
 try:
     data = load_data(horizon_map[horizon])  # 根據選的時間範圍，載入資料  
 except Exception as e:
-    st.error(f"Error loading data: {e}")
+    st.warning(f"Error loading data: {e} \nTry again later.")
+    load_data.clear()  # Remove the bad cache entry.
     st.stop()
 
+# Plotting the data 
+with right_cell:
+    # 先加總
+    data["in_total"] = data["in_total_m_sum"] + data["in_total_f_sum"]
+
+    # melt 整理格式
+    melted = data[["年月", "city_name", "in_total"]].melt(
+        id_vars=["年月", "city_name"],
+        value_name="數量"
+    )
+
+    st.altair_chart(
+        alt.Chart(melted)
+        .mark_line()
+        .encode(
+            alt.X("年月:O"),           # O = Ordinal 類別，N = Nominal，Q = 數量
+            alt.Y("數量:Q"),
+            alt.Color("city_name:N"),
+        )
+        .properties(height=400),
+        use_container_width=True
+    )
 
 """
 ## Raw data
