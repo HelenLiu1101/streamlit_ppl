@@ -38,7 +38,30 @@ def get_yyymm_list(months: int) -> list[str]:
 
 ###
 
-COUNTIES = ["臺北市", "新北市", "臺中市", "臺南市", "高雄市"]
+COUNTIES = [
+    "連江縣",
+    "金門縣",
+    "宜蘭縣",
+    "新竹縣",
+    "苗栗縣",
+    "彰化縣",
+    "南投縣",
+    "雲林縣",
+    "嘉義縣",
+    "屏東縣",
+    "臺東縣",
+    "花蓮縣",   
+    "澎湖縣",
+    "基隆市",
+    "新竹市",
+    "嘉義市",
+    "臺北市",
+    "高雄市",
+    "新北市",
+    "臺中市",
+    "臺南市",
+    "桃園市"
+]
 DEFAULT_COUNTIES = ["臺北市", "新北市", "臺中市", "臺南市", "高雄市"]
 
 def counties_to_str(counties):    
@@ -180,17 +203,21 @@ with right_cell:
         id_vars=["年月", "city_name"],
         value_name="數量"
     )
+    filtered = melted[melted["city_name"].isin(tickers)]
 
     st.altair_chart(
-        alt.Chart(melted)
+        alt.Chart(filtered)
         .mark_line()
         .encode(
             alt.X("年月:O"),           # O = Ordinal 類別，N = Nominal，Q = 數量
             alt.Y("數量:Q"),
             alt.Color("city_name:N"),
         )
-        .properties(height=400),
-        use_container_width=True
+        .properties(
+            height=400,
+            title="各縣市遷入人口趨勢"
+        ),
+        width = 'stretch'
     )
 
 """
