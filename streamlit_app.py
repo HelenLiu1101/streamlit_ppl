@@ -80,7 +80,7 @@ def update_query_param():
         st.query_params.pop("counties", None)
 
 top_left_cell = cols[0].container(
-    border=True, height="stretch", vertical_alignment="center"
+    border=True, height="stretch", vertical_alignment="top"
 )
 
 with top_left_cell:
@@ -98,8 +98,7 @@ horizon_map = {
     "3 Months": 3,
     "6 Months": 6,
     "9 Months": 9,
-    "1 Year": 12,
-    "5 Years": 60
+    "1 Year": 12
 }
 
 with top_left_cell:
@@ -107,7 +106,7 @@ with top_left_cell:
     horizon = st.pills(
         "Time horizon",
         options=list(horizon_map.keys()),
-        default="3 Months",
+        default="6 Months",
     )
 
 # Update query param when text input changes
@@ -161,13 +160,13 @@ def process_data(raw: list) -> pd.DataFrame:
     df["out_total_m"] = pd.to_numeric(df["out_total_m"], errors="coerce")
     df["out_total_f"] = pd.to_numeric(df["out_total_f"], errors="coerce")
 
+    df["in_total"] = df["in_total_m"] + df["in_total_f"]
+    df["out_total"] = df["out_total_m"] + df["out_total_f"]
     result = (
         df.groupby(["city_code", "city_name"])
         .agg(
-            in_total_m_sum =("in_total_m", "sum"), 
-            in_total_f_sum =("in_total_f", "sum"),
-            out_total_m_sum =("out_total_m", "sum"),
-            out_total_f_sum =("out_total_f", "sum")
+            in_total_sum =("in_total", "sum"), 
+            out_total_sum =("out_total", "sum")
             ) # agg = aggregate（聚合），對每個分組做計算
                 # 語法是 新欄位名稱 = ("來源欄位", "計算方式")
         .reset_index()
@@ -183,23 +182,19 @@ def load_data(months: int) -> pd.DataFrame:
         df = process_data(raw)        # df
         df["年月"] = yyymm           # 記錄月份
         all_dfs.append(df)
-    
     return pd.concat(all_dfs, ignore_index=True)
 
 try:
     data = load_data(horizon_map[horizon])  # 根據選的時間範圍，載入資料  
 except Exception as e:
     st.warning(f"Error loading data: {e} \nTry again later.")
-    load_data.clear()  # Remove the bad cache entry.
     st.stop()
 
 # Plotting the data 
 with right_cell:
-    # 先加總
-    data["in_total"] = data["in_total_m_sum"] + data["in_total_f_sum"]
-
+    
     # melt 整理格式
-    melted = data[["年月", "city_name", "in_total"]].melt(
+    melted = data[["年月", "city_name", "in_total_sum"]].melt(
         id_vars=["年月", "city_name"],
         value_name="數量"
     )
