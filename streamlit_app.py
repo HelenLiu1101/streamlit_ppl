@@ -22,22 +22,6 @@ Compare cities and counties at a glance
 cols = st.columns([1, 3])
 # Will declare right cell later to avoid showing it when no data.
 
-
-def get_yyymm_list(months: int) -> list[str]:
-    """產生往前推 N 個月的民國年月清單"""
-    now = datetime.now()
-    result = []
-    for i in range(1, months + 1):
-        dt = now - relativedelta(months=i)
-        # 西元年轉民國年
-        roc_year = dt.year - 1911
-        yyymm = f"{roc_year}{dt.month:02d}"
-        result.append(yyymm)
-    return result  # 現在是11504 -> ["11503", "11502", "11501"]
-
-
-###
-
 COUNTIES = [
     "連江縣",
     "金門縣",
@@ -127,52 +111,76 @@ right_cell = cols[1].container(
     border=True, height="stretch", vertical_alignment="center"
 )
 
-@st.cache_data(show_spinner=True, ttl="30d") # cache_data = 快取資料，show_spinner = 顯示載入動畫，ttl = 資料有效期限
+def get_yyymm_list(months: int) -> list[str]:
+    """產生往前推 N 個月的民國年月清單"""
+    now = datetime.now()
+    result = []
+    last_month = 1
+    if now.day < 15:  # 如果當月初幾天，通常資料還沒出來，就從上上個月開始算
+        last_month = 2
+    for i in range(last_month, months + last_month):  # 從last_month開始往前推,因為當月資料通常還沒出來
+        dt = now - relativedelta(months=i)
+        # 西元年轉民國年
+        roc_year = dt.year - 1911
+        yyymm = f"{roc_year}{dt.month:02d}"
+        result.append(yyymm)
+    return result  # 現在是11504 -> ["11503", "11502", "11501"]
+
+
+@st.cache_data(show_spinner=True, ttl="30d") # ttl = 資料有效期限
 def fetch_data(yyymm: str) -> list:
-    """抓單一月份所有頁，yyymm 為民國年月，例如 '11301'; 此api從'10701'開始有資料"""
+    """抓單一月份所有頁的資料，yyymm 為民國年月，例如 '11301'; 此api從'10701'開始有資料"""
     url = f"https://www.ris.gov.tw/rs-opendata/api/v1/datastore/ODRP011/{yyymm}"
-    
+    # st.write(f"Fetching data for {yyymm}...")  # 顯示正在抓取資料的訊息
     # 先抓第一頁，確認總頁數
     res = requests.get(url, params={"page": 1}, timeout=10)
     res.raise_for_status()
-    first = res.json()
-    
+    first = res.json() # 這裡是 dict，裡面有 totalPage 和 responseData 等欄位
     total_pages = int(first["totalPage"])
-    all_data = first["responseData"]  # 第一頁資料先存起來
+    all_data = first["responseData"]  # 第一頁資料先存起來; all_data 是 list，裡面每個元素是 dict，代表一筆遷移資料
     
     # 從第二頁開始抓
     for page in range(2, total_pages + 1):
         res = requests.get(url, params={"page": page}, timeout=10)
         res.raise_for_status()
-        all_data.extend(res.json()["responseData"])  # 接在後面
-    
+        all_data.extend(res.json()["responseData"])  # extend 是把新抓到的資料接在後面; append 是把整個 list 當成一個元素加進去，會多一層 list 結構，變成巢狀
     return all_data  # 回傳完整 list，可直接 pd.DataFrame(all_data)
 
-# 參數 raw 預期傳入的是 list 型別; -> pd.DataFrame這個函式預期回傳 pd.DataFrame
+@st.cache_data(show_spinner=True, ttl="30d") 
+# 參數 raw 預期傳入的是 list 型別; -> 這個函式預期回傳 pd.DataFrame
 def process_data(raw: list) -> pd.DataFrame:
-    """將原始資料轉成適合分析的格式"""
+    """將該月份原始資料轉成df，並做初步整理"""
     df = pd.DataFrame(raw) #把原始資料轉成df  
-    df["city_code"] = df["district_code"].str[:5]  # 取前五碼，新增一欄
-    df["city_name"] = df["site_id"].str[:3] # 取前三碼，新增一欄
+    
+    # Check for required columns
+    required_cols = ["site_id", "in_total_m", "in_total_f", "out_total_m", "out_total_f"]
+    missing_cols = [col for col in required_cols if col not in df.columns]
+    if missing_cols:
+        raise ValueError(f"Missing required columns: {missing_cols}")
+    
+    # df["city_code"] = df["district_code"].str[:5]  # 取前五碼，新增一欄
+    df["縣市"] = df["site_id"].str[:3] # 取前三碼，新增一欄
     # 字串轉數字
-    df["in_total_m"] = pd.to_numeric(df["in_total_m"], errors="coerce")
-    df["in_total_f"] = pd.to_numeric(df["in_total_f"], errors="coerce")
-    df["out_total_m"] = pd.to_numeric(df["out_total_m"], errors="coerce")
-    df["out_total_f"] = pd.to_numeric(df["out_total_f"], errors="coerce")
+    cols = ["in_total_m", "in_total_f", "out_total_m", "out_total_f"] 
+    df[cols] = df[cols].apply(pd.to_numeric, errors="coerce") 
+    #一次選取多欄，回傳一個小 df, apply 把 pd.to_numeric 套用到每一欄
+    # "coerce" 使無法轉成數字的值變成 NaN，避免後續計算出錯
 
     df["in_total"] = df["in_total_m"] + df["in_total_f"]
     df["out_total"] = df["out_total_m"] + df["out_total_f"]
     result = (
-        df.groupby(["city_code", "city_name"])
+        df.groupby("縣市")
         .agg(
             in_total_sum =("in_total", "sum"), 
             out_total_sum =("out_total", "sum")
             ) # agg = aggregate（聚合），對每個分組做計算
                 # 語法是 新欄位名稱 = ("來源欄位", "計算方式")
-        .reset_index()
+        .reset_index() 
+        # groupby 以後會把分組的欄位（這裡是 "縣市"）變成 index，reset_index() 把它變回一般欄位 
     )
     return result
 
+@st.cache_data(show_spinner=True, ttl="30d") 
 def load_data(months: int) -> pd.DataFrame:
     yyymm_list = get_yyymm_list(months) # 根據選的時間範圍，產生對應的 yyymm 清單
     
@@ -180,7 +188,7 @@ def load_data(months: int) -> pd.DataFrame:
     for yyymm in yyymm_list:
         raw = fetch_data(yyymm)       # list
         df = process_data(raw)        # df
-        df["年月"] = yyymm           # 記錄月份
+        df["年月"] = yyymm[:3] + "年" + yyymm[3:5] + "月"    # 記錄月份
         all_dfs.append(df)
     return pd.concat(all_dfs, ignore_index=True)
 
@@ -194,19 +202,19 @@ except Exception as e:
 with right_cell:
     
     # melt 整理格式
-    melted = data[["年月", "city_name", "in_total_sum"]].melt(
-        id_vars=["年月", "city_name"],
+    melted = data[["年月", "縣市", "in_total_sum"]].melt(
+        id_vars=["年月", "縣市"],
         value_name="數量"
     )
-    filtered = melted[melted["city_name"].isin(tickers)]
+    filtered = melted[melted["縣市"].isin(tickers)]
 
     st.altair_chart(
         alt.Chart(filtered)
         .mark_line()
         .encode(
-            alt.X("年月:O"),           # O = Ordinal 類別，N = Nominal，Q = 數量
+            alt.X("年月:O"),           # O = Ordinal 有順序的類別（年月），N = Nominal 無順序的類別，Q = 數量
             alt.Y("數量:Q"),
-            alt.Color("city_name:N"),
+            alt.Color("縣市:N"),
         )
         .properties(
             height=400,
